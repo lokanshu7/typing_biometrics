@@ -1,10 +1,12 @@
 import numpy as np
 from typing import List, Dict, Tuple
-from sklearn.ensemble import RandomForestClassifier , IsolationForest
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
+from sklearn.svm import OneClassSVM
 from sklearn.preprocessing import StandardScaler
 import pickle
 from datetime import datetime
 import logging
+from scipy import stats 
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -113,6 +115,10 @@ class TypingBiometricsService:
         )
         iso_forest.fit(feature_matrix)
         profile["isolation_forest"] = iso_forest 
+        # One Class SVM
+        oc_svm = OneClassSVM(kernel='rbf', gamma='auto', nu=0.1)
+        oc_svm.fit(feature_matrix)
+        profile['oc_svm'] = oc_svm
         self.user_profiles[user_id] = profile
         logger.info(f"User {user_id} enrolled with {len(feature_vectors)} samples")
         
@@ -161,10 +167,25 @@ class TypingBiometricsService:
         # Combined confidence score
         confidence = (similarity + max(0, 1 - min_sample_dist/3)) / 2
         #adding isolation prediction 
-        if "isolation_forest" in profile:
-            iso_pred =profile["isolation_forest"].predict([features])[0]
-            iso_score = 1. if iso_pred == 1 else 0.0
-        confidence = (confidence + iso_score ) / 2
+        # Isolation Forest prediction
+        iso_score = 0.5
+        if 'isolation_forest' in profile:
+            iso_pred = profile['isolation_forest'].predict([features])[0]
+            iso_score = 1.0 if iso_pred == 1 else 0.0
+
+        # Z-score matching
+        z_scores = np.abs((features - profile['mean']) / (profile['std'] + 1e-6))
+        z_score_confidence = float(max(0, 1 - (np.mean(z_scores) / 10)))
+
+        # Combined — all three voting together
+        # One Class SVM prediction
+        svm_score = 0.5
+        if 'oc_svm' in profile:
+            svm_pred = profile['oc_svm'].predict([features])[0]
+            svm_score = 1.0 if svm_pred == 1 else 0.0
+
+            # All 4 algorithms voting together
+        confidence = (similarity + iso_score + z_score_confidence + svm_score) / 4
         
         authenticated = confidence >= threshold
         
