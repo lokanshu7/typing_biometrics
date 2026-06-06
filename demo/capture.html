@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+
+<body>
+<p>Enter user id</p>    
+<input id="userId">
+
+<p id="sampleText">Sample 1 of 3</p>
+
+<h1>Typing Biometrics Demo</h1>
+<p>The quick brown fox jumps over the lazy dog</p>
+<input id="typingBox">
+<button id="submitBtn">Submit</button>
+
+
+<script>
+    let startTime = null;
+    let pressedKeys = {};
+    let keystrokes = [];
+
+    let typingBox = document.getElementById("typingBox");
+    let sampleText = document.getElementById("sampleText");
+    let submitBtn = document.getElementById("submitBtn");
+    let userIdBox = document.getElementById("userId");
+
+    typingBox.addEventListener("keydown", function(event) {
+
+        if (startTime == null) {
+        startTime = performance.now();
+    }
+
+        let pressTime = performance.now() - startTime;
+        pressedKeys[event.key] = pressTime;
+        console.log(pressedKeys);
+    console.log(event.key);
+});
+
+typingBox.addEventListener("keyup", function(event) {
+
+    if (pressedKeys[event.key] === undefined) {
+        return;
+    }
+
+    let releaseTime = performance.now() - startTime;
+
+    let keystroke = {
+        key: event.key,
+        press_time: pressedKeys[event.key],
+        release_time: releaseTime
+    };
+
+    keystrokes.push(keystroke);
+
+    console.log(keystroke);
+    console.log(keystrokes);
+});
+
+let sessions = [];
+submitBtn.addEventListener("click", function() {
+
+    let session = {
+        user_id: userIdBox.value,
+        text: "The quick brown fox jumps over the lazy dog",
+        keystrokes: keystrokes,
+        session_start: 0,
+        session_end: performance.now() - startTime
+    };
+
+    console.log(session);
+    sessions.push(session);
+    console.log(JSON.stringify(session, null, 2));
+
+    keystrokes = [];
+    pressedKeys = {};
+    startTime = null;
+    typingBox.value = "";
+
+    console.log(sessions);
+
+    if (sessions.length === 1) {
+
+    sampleText.textContent = "Sample 2 of 3";
+
+}
+else if (sessions.length === 2) {
+
+    sampleText.textContent = "Sample 3 of 3";
+
+}
+else if (sessions.length === 3) {
+    submitBtn.disabled = true; // Disable the button after 3 samples
+
+    let data = {
+        user_id: userIdBox.value,
+        sessions: sessions
+    };
+    console.log(data); // Log the final data structure to the console
+
+    fetch("http://localhost:8000/enroll", {
+    method: "POST",
+    headers: {
+        "Content-Type": "application/json"
+    },
+    body: JSON.stringify(data)
+})
+    .then(response => response.json())
+    .then(data => {
+    console.log(data);
+})
+    .catch(error => {
+    console.log(error);
+});
+
+    sampleText.textContent = "Enrollment Complete";
+    console.log("Ready to send");
+
+}
+
+});
+
+</script>
+</body>
+</html>
