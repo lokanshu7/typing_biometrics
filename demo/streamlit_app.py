@@ -52,7 +52,13 @@ if mode == "Enroll":
                     'session_end': 5000.0
                 })
             try:
-                r = requests.post(f"{API_URL}/enroll", json={'user_id': user_id, 'sessions': sessions_data})
+                r = requests.post(f"{API_URL}/enroll", 
+                                  json={
+                                      'user_id': user_id, 
+                                      'sessions': sessions_data
+                                }
+                    )
+                
                 if r.ok:
                     data = r.json()
                     if data.get('decision') == 'pass':
