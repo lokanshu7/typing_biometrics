@@ -96,20 +96,20 @@ else if (sessions.length === 3) {
     };
     console.log(data); // Log the final data structure to the console
 
-    fetch("http://localhost:8000/enroll", {
-    method: "POST",
-    headers: {
-        "Content-Type": "application/json"
-    },
-    body: JSON.stringify(data)
-})
+    fetch("http://localhost:8000/enroll_typing", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(data)
+    })
     .then(response => response.json())
     .then(data => {
-    console.log(data);
-})
+        console.log(data);
+    })
     .catch(error => {
-    console.log(error);
-});
+        console.log(error);
+    });
 
     sampleText.textContent = "Enrollment Complete";
     console.log("Ready to send");
@@ -117,6 +117,97 @@ else if (sessions.length === 3) {
 }
 
 });
+
+/* ===========================
+   VERIFY FUNCTIONALITY
+=========================== */
+
+let verifyStartTime = null;
+let verifyPressedKeys = {};
+let verifyKeystrokes = [];
+
+let verifyBox = document.getElementById("verifyBox");
+let verifyBtn = document.getElementById("verifyBtn");
+let verifyResult = document.getElementById("verifyResult");
+
+verifyBox.addEventListener("keydown", function(event) {
+
+    if (verifyStartTime == null) {
+        verifyStartTime = performance.now();
+    }
+
+    let pressTime = performance.now() - verifyStartTime;
+    verifyPressedKeys[event.key] = pressTime;
+});
+
+verifyBox.addEventListener("keyup", function(event) {
+
+    if (verifyPressedKeys[event.key] === undefined) {
+        return;
+    }
+
+    let releaseTime = performance.now() - verifyStartTime;
+
+    let keystroke = {
+        key: event.key,
+        press_time: verifyPressedKeys[event.key],
+        release_time: releaseTime
+    };
+
+    verifyKeystrokes.push(keystroke);
+});
+
+verifyBtn.addEventListener("click", function() {
+
+    if (verifyKeystrokes.length === 0) {
+        verifyResult.textContent = "Please type before verifying";
+        return;
+    }
+
+    let session = {
+        user_id: userIdBox.value,
+        text: "The quick brown fox jumps over the lazy dog",
+        keystrokes: verifyKeystrokes,
+        session_start: 0,
+        session_end: performance.now() - verifyStartTime
+    };
+
+    let data = {
+        user_id: userIdBox.value,
+        session: session
+    };
+
+    fetch("http://localhost:8000/verify_typing", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+
+        verifyResult.textContent =
+            "Decision: " +
+            data.decision +
+            " | Confidence: " +
+            data.confidence;
+
+        console.log(data);
+    })
+    .catch(error => {
+
+        console.log(error);
+        verifyResult.textContent = "Verification failed";
+    });
+
+    verifyKeystrokes = [];
+    verifyPressedKeys = {};
+    verifyStartTime = null;
+    verifyBox.value = "";
+});
+
+
 
 </script>
 </body>
