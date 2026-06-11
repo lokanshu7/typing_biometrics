@@ -72,7 +72,7 @@ async def root():
         "endpoints": ["/health", "/version", "/enroll", "/verify", "/users"]
     }
 
-@app.post("/enroll", response_model=StandardResponse)
+@app.post("/enroll_typing", response_model=StandardResponse)
 async def enroll(request: EnrollRequest):
     """Enroll a new user with typing samples"""
     start_time = time.time()
@@ -146,7 +146,7 @@ async def enroll(request: EnrollRequest):
             latency_ms=latency_ms
         )
 
-@app.post("/verify", response_model=StandardResponse)
+@app.post("/verify_typing", response_model=StandardResponse)
 async def verify(request: AuthenticateRequest):
     """Verify/authenticate user based on typing pattern"""
     start_time = time.time()
