@@ -52,7 +52,7 @@ if mode == "Enroll":
                     'session_end': 5000.0
                 })
             try:
-                r = requests.post(f"{API_URL}/enroll", 
+                r = requests.post(f"{API_URL}/enroll_typing", 
                                   json={
                                       'user_id': user_id, 
                                       'sessions': sessions_data

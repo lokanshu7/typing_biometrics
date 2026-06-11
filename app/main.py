@@ -5,14 +5,13 @@ from typing import List
 import time
 import uuid
 from datetime import datetime
-from app.schemas import (
+from schemas import (
     EnrollRequest, AuthenticateRequest,
     StandardResponse, ActivityEvent,
     HealthResponse, VersionResponse
 )
-
-from app.services import TypingBiometricsService
-from app.storage import LocalStorage
+from services import TypingBiometricsService
+from storage import LocalStorage
 
 app = FastAPI(
     title="Typing Biometrics API",
