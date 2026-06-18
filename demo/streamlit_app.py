@@ -39,7 +39,7 @@ if mode == "Enroll":
     if st.button("Enroll"):
         if not user_id:
             st.error("Please enter a User ID")
-        elif s1 != phrase or s2 != phrase or s3 != phrase:
+        elif s1.strip() != phrase.strip() or s2.strip() != phrase.strip() or s3.strip() != phrase.strip(): 
             st.warning(f"⚠️ All 3 samples must exactly match the phrase. Check spelling/spaces.")
         else:
             sessions_data = []
@@ -52,7 +52,7 @@ if mode == "Enroll":
                     'session_end': 5000.0
                 })
             try:
-                r = requests.post(f"{API_URL}/enroll", json={'user_id': user_id, 'sessions': sessions_data})
+                r = requests.post(f"{API_URL}/enroll_typing", json={'user_id': user_id, 'sessions': sessions_data})
                 if r.ok:
                     data = r.json()
                     if data.get('decision') == 'pass':
@@ -77,7 +77,7 @@ elif mode == "Authenticate":
         text = st.text_input("Type the phrase here")
 
         if st.button("Authenticate"):
-            if text != phrase:
+            if text.strip() != phrase.strip():
                 st.warning("⚠️ Phrase doesn't match exactly.")
             else:
                 session = {
@@ -88,7 +88,7 @@ elif mode == "Authenticate":
                     'session_end': 5000.0
                 }
                 try:
-                    r = requests.post(f"{API_URL}/verify", json={'user_id': user_id, 'session': session})
+                    r = requests.post(f"{API_URL}/verify_typing", json={'user_id': user_id, 'session': session})
                     if r.ok:
                         res = r.json()
                         confidence = res.get('confidence', 0)
