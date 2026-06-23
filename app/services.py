@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from datetime import datetime
 import logging
 
@@ -19,19 +19,25 @@ class TypingBiometricsService:
 
         try:
             dwell_times = [
-                k["release_time"] - k["press_time"]
+                max(0, k["release_time"] - k["press_time"])
                 for k in keystrokes
             ]
 
             flight_times = [
-                keystrokes[i + 1]["press_time"]
-                - keystrokes[i]["release_time"]
+                max(
+                    0,
+                    keystrokes[i + 1]["press_time"]
+                    - keystrokes[i]["release_time"]
+                )
                 for i in range(len(keystrokes) - 1)
             ]
 
             digraph_times = [
-                keystrokes[i + 1]["press_time"]
-                - keystrokes[i]["press_time"]
+                max(
+                    0,
+                    keystrokes[i + 1]["press_time"]
+                    - keystrokes[i]["press_time"]
+                )
                 for i in range(len(keystrokes) - 1)
             ]
 
@@ -46,12 +52,14 @@ class TypingBiometricsService:
             )
 
             backspace_count = sum(
-                1 for k in keystrokes
+                1
+                for k in keystrokes
                 if k.get("key", "").lower() == "backspace"
             )
 
             backspace_rate = (
                 backspace_count / len(keystrokes)
+                if len(keystrokes) > 0 else 0
             )
 
             pauses = [
@@ -64,6 +72,11 @@ class TypingBiometricsService:
             avg_pause_duration = (
                 np.mean(pauses)
                 if pauses else 0
+            )
+
+            pause_ratio = (
+                pause_count / len(flight_times)
+                if flight_times else 0
             )
 
             features = [
@@ -85,13 +98,29 @@ class TypingBiometricsService:
                 typing_speed,
                 backspace_rate,
                 pause_count,
-                avg_pause_duration
+                avg_pause_duration,
+
+                np.max(dwell_times),
+                np.min(dwell_times),
+
+                np.max(flight_times) if flight_times else 0,
+                np.min(flight_times) if flight_times else 0,
+
+                np.var(dwell_times),
+
+                duration,
+
+                pause_ratio,
+
+                backspace_count
             ]
 
-            return np.array(features)
+            return np.array(features, dtype=float)
 
         except Exception as e:
-            logger.error(f"Feature extraction failed: {e}")
+            logger.error(
+                f"Feature extraction failed: {e}"
+            )
             return np.array([])
 
     def enroll_user(
@@ -100,7 +129,9 @@ class TypingBiometricsService:
         sessions: List[dict]
     ) -> Dict:
 
-        logger.info(f"Enrolling user: {user_id}")
+        logger.info(
+            f"User {user_id} enrollment started"
+        )
 
         feature_vectors = []
 
@@ -136,7 +167,7 @@ class TypingBiometricsService:
         self.user_profiles[user_id] = profile
 
         logger.info(
-            f"{user_id} enrolled successfully"
+            f"User {user_id} enrolled successfully"
         )
 
         return {
@@ -179,7 +210,7 @@ class TypingBiometricsService:
         )
 
         similarity_score = max(
-            0,
+            0.0,
             1 - (euclidean_distance / 5.0)
         )
 
@@ -193,17 +224,30 @@ class TypingBiometricsService:
             )
 
             score = max(
-                0,
+                0.0,
                 1 - (distance / 3.0)
             )
 
             sample_scores.append(score)
 
-        nearest_sample_score = max(sample_scores)
+        nearest_sample_score = (
+            max(sample_scores)
+            if sample_scores else 0.0
+        )
 
         confidence = (
-            similarity_score * 0.6
-            + nearest_sample_score * 0.4
+            similarity_score * 0.5
+            + nearest_sample_score * 0.5
+        )
+
+        confidence = max(
+            0.0,
+            min(1.0, confidence)
+        )
+
+        confidence = round(
+            confidence,
+            3
         )
 
         authenticated = (
@@ -213,7 +257,7 @@ class TypingBiometricsService:
         logger.info(
             f"User={user_id} "
             f"Auth={authenticated} "
-            f"Confidence={confidence:.3f}"
+            f"Confidence={confidence}"
         )
 
         return authenticated, confidence
@@ -221,7 +265,7 @@ class TypingBiometricsService:
     def get_user_profile(
         self,
         user_id: str
-    ) -> Dict:
+    ) -> Optional[Dict]:
 
         if user_id not in self.user_profiles:
             return None
