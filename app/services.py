@@ -8,96 +8,107 @@ logger = logging.getLogger(__name__)
 
 
 class TypingBiometricsService:
-    """ML service for typing pattern analysis"""
 
     def __init__(self):
         self.user_profiles = {}
 
     def extract_features(self, keystrokes: List[dict]) -> np.ndarray:
-        """Extract statistical timing features from keystroke data."""
 
-        if len(keystrokes) < 2:
+        if not keystrokes or len(keystrokes) < 2:
             return np.array([])
 
-        # Dwell Time (key hold duration)
-        dwell_times = [
-            k["release_time"] - k["press_time"]
-            for k in keystrokes
-        ]
+        try:
+            dwell_times = [
+                k["release_time"] - k["press_time"]
+                for k in keystrokes
+            ]
 
-        # Flight Time (release -> next press)
-        flight_times = [
-            keystrokes[i + 1]["press_time"] -
-            keystrokes[i]["release_time"]
-            for i in range(len(keystrokes) - 1)
-        ]
+            flight_times = [
+                keystrokes[i + 1]["press_time"]
+                - keystrokes[i]["release_time"]
+                for i in range(len(keystrokes) - 1)
+            ]
 
-        # Digraph Time (press -> next press)
-        digraph_times = [
-            keystrokes[i + 1]["press_time"] -
-            keystrokes[i]["press_time"]
-            for i in range(len(keystrokes) - 1)
-        ]
+            digraph_times = [
+                keystrokes[i + 1]["press_time"]
+                - keystrokes[i]["press_time"]
+                for i in range(len(keystrokes) - 1)
+            ]
 
-        features = []
+            duration = (
+                keystrokes[-1]["release_time"]
+                - keystrokes[0]["press_time"]
+            )
 
-        # Dwell statistics
-        features.extend([
-            np.mean(dwell_times),
-            np.std(dwell_times),
-            np.median(dwell_times),
-            np.percentile(dwell_times, 25),
-            np.percentile(dwell_times, 75)
-        ])
+            typing_speed = (
+                len(keystrokes) / duration * 1000
+                if duration > 0 else 0
+            )
 
-        # Flight statistics
-        if flight_times:
-            features.extend([
-                np.mean(flight_times),
-                np.std(flight_times),
-                np.median(flight_times)
-            ])
-        else:
-            features.extend([0, 0, 0])
+            backspace_count = sum(
+                1 for k in keystrokes
+                if k.get("key", "").lower() == "backspace"
+            )
 
-        # Digraph statistics
-        if digraph_times:
-            features.extend([
-                np.mean(digraph_times),
-                np.std(digraph_times),
-                np.max(digraph_times),
-                np.min(digraph_times)
-            ])
-        else:
-            features.extend([0, 0, 0, 0])
+            backspace_rate = (
+                backspace_count / len(keystrokes)
+            )
 
-        # Typing Speed
-        duration = (
-            keystrokes[-1]["release_time"]
-            - keystrokes[0]["press_time"]
-        )
+            pauses = [
+                f for f in flight_times
+                if f > 500
+            ]
 
-        typing_speed = (
-            len(keystrokes) / duration * 1000
-            if duration > 0 else 0
-        )
+            pause_count = len(pauses)
 
-        features.append(typing_speed)
+            avg_pause_duration = (
+                np.mean(pauses)
+                if pauses else 0
+            )
 
-        return np.array(features)
+            features = [
+                np.mean(dwell_times),
+                np.std(dwell_times),
+                np.median(dwell_times),
+                np.percentile(dwell_times, 25),
+                np.percentile(dwell_times, 75),
+
+                np.mean(flight_times) if flight_times else 0,
+                np.std(flight_times) if flight_times else 0,
+                np.median(flight_times) if flight_times else 0,
+
+                np.mean(digraph_times) if digraph_times else 0,
+                np.std(digraph_times) if digraph_times else 0,
+                np.max(digraph_times) if digraph_times else 0,
+                np.min(digraph_times) if digraph_times else 0,
+
+                typing_speed,
+                backspace_rate,
+                pause_count,
+                avg_pause_duration
+            ]
+
+            return np.array(features)
+
+        except Exception as e:
+            logger.error(f"Feature extraction failed: {e}")
+            return np.array([])
 
     def enroll_user(
         self,
         user_id: str,
         sessions: List[dict]
     ) -> Dict:
-        """Create a typing profile for a user."""
 
         logger.info(f"Enrolling user: {user_id}")
 
         feature_vectors = []
 
         for session in sessions:
+
+            if "keystrokes" not in session:
+                continue
+
             features = self.extract_features(
                 session["keystrokes"]
             )
@@ -108,10 +119,7 @@ class TypingBiometricsService:
         if len(feature_vectors) < 3:
             return {
                 "success": False,
-                "message": (
-                    "Insufficient valid samples. "
-                    "Need at least 3 sessions."
-                )
+                "message": "Minimum 3 valid sessions required."
             }
 
         feature_matrix = np.array(feature_vectors)
@@ -128,30 +136,26 @@ class TypingBiometricsService:
         self.user_profiles[user_id] = profile
 
         logger.info(
-            f"User {user_id} enrolled with "
-            f"{len(feature_vectors)} samples"
+            f"{user_id} enrolled successfully"
         )
 
         return {
             "success": True,
-            "message": (
-                f"User {user_id} enrolled successfully"
-            ),
-            "sample_count": len(feature_vectors)
+            "sample_count": len(feature_vectors),
+            "message": "Enrollment successful"
         }
 
     def authenticate(
         self,
         user_id: str,
         session: dict,
-        threshold: float = 0.7
+        threshold: float = 0.70
     ) -> Tuple[bool, float]:
-        """Verify user identity using typing pattern."""
 
         if user_id not in self.user_profiles:
-            logger.warning(
-                f"User {user_id} not enrolled"
-            )
+            return False, 0.0
+
+        if "keystrokes" not in session:
             return False, 0.0
 
         features = self.extract_features(
@@ -166,48 +170,50 @@ class TypingBiometricsService:
         mean_features = profile["mean"]
         std_features = profile["std"] + 1e-6
 
-        # Distance from user's average profile
         normalized_diff = (
             features - mean_features
         ) / std_features
 
-        euclidean_dist = np.linalg.norm(
+        euclidean_distance = np.linalg.norm(
             normalized_diff
         )
 
-        max_expected_dist = 5.0
-
-        similarity = max(
+        similarity_score = max(
             0,
-            1 - (euclidean_dist / max_expected_dist)
+            1 - (euclidean_distance / 5.0)
         )
 
-        # Compare against all enrolled samples
-        sample_distances = []
+        sample_scores = []
 
         for sample in profile["samples"]:
+
             distance = np.linalg.norm(
                 (features - sample)
                 / std_features
             )
 
-            sample_distances.append(distance)
+            score = max(
+                0,
+                1 - (distance / 3.0)
+            )
 
-        min_sample_dist = min(sample_distances)
+            sample_scores.append(score)
+
+        nearest_sample_score = max(sample_scores)
 
         confidence = (
-            similarity +
-            max(0, 1 - min_sample_dist / 3)
-        ) / 2
+            similarity_score * 0.6
+            + nearest_sample_score * 0.4
+        )
 
         authenticated = (
             confidence >= threshold
         )
 
         logger.info(
-            f"Authentication for {user_id}: "
-            f"{authenticated} "
-            f"(confidence={confidence:.3f})"
+            f"User={user_id} "
+            f"Auth={authenticated} "
+            f"Confidence={confidence:.3f}"
         )
 
         return authenticated, confidence
@@ -216,7 +222,6 @@ class TypingBiometricsService:
         self,
         user_id: str
     ) -> Dict:
-        """Return stored user profile."""
 
         if user_id not in self.user_profiles:
             return None
@@ -225,16 +230,10 @@ class TypingBiometricsService:
 
         return {
             "user_id": user_id,
-            "enrolled_at": profile["enrolled_at"],
             "sample_count": profile["sample_count"],
-            "feature_means": (
-                profile["mean"].tolist()
-            )
+            "enrolled_at": profile["enrolled_at"],
+            "feature_means": profile["mean"].tolist()
         }
 
     def list_users(self) -> List[str]:
-        """Return all enrolled users."""
-
-        return list(
-            self.user_profiles.keys()
-        )
+        return list(self.user_profiles.keys())
