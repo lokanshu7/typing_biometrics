@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 class TypingBiometricsService:
 
     def __init__(self):
-        self.user_profiles = {}
+        self.user_profiles: Dict[str, Dict] = {}
 
     def extract_features(self, keystrokes: List[dict]) -> np.ndarray:
 
