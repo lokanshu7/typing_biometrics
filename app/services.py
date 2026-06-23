@@ -209,7 +209,7 @@ class TypingBiometricsService:
             "event": "verify",
             "user_id": user_id,
             "confidence": confidence,
-            "result": authenticated,
+            "result": bool(authenticated),
             "time": datetime.now().isoformat()
         })
 
