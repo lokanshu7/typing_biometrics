@@ -1,627 +1,694 @@
 # BEHAVIORAL BIOMETRICS: TYPING PATTERN AUTHENTICATION SYSTEM
-## Project Submission Report
+## Project 7 — Technical Submission Report
+### ByoSync · Kavion Intelligence Pvt. Ltd. · Internship 2026
 
 ---
 
-### EXECUTIVE SUMMARY
+## EXECUTIVE SUMMARY
 
-This project implements a **behavioral biometrics authentication system** based on keystroke dynamics analysis. The system uses machine learning techniques to create unique typing profiles for users and authenticate them based on their typing patterns. The implementation demonstrates a complete end-to-end solution including REST API, web interface, and standardized response protocols.
+This project implements a **behavioral biometrics authentication system** based on keystroke dynamics analysis. The system captures millisecond-precision typing timing from a browser interface, engineers a 24-dimensional feature vector per session, and verifies identity using a **4-algorithm weighted ensemble** comprising z-score similarity, nearest-sample distance, Isolation Forest, and One-Class SVM.
+
+The full stack is production-pattern: FastAPI + Uvicorn backend, JavaScript `performance.now()` keystroke capture, Streamlit demo UI, pytest test suite, and append-only JSONL activity logging — all running locally with file-based persistence.
 
 **Key Achievements:**
-* 13-feature keystroke dynamics analysis engine
-* RESTful API with standardized response format and activity logging
-* Interactive web demo for real-time testing
-* Comprehensive test suite and documentation
-* Compliant with educational/demo system guidelines
 
-**Performance Metrics:**
-* False Accept Rate (FAR): ~5-10%
-* False Reject Rate (FRR): ~10-15%
-* Authentication latency: 200-300ms
-* Minimum enrollment samples: 3-5 sessions
+| Area | Achievement |
+|------|-------------|
+| Feature Engineering | 24-dimensional keystroke feature vector |
+| ML Ensemble | 4-algorithm weighted voting (z-score + nearest + IsoForest + OC-SVM) |
+| API | REST API with standardized response shape and activity logging |
+| Persistence | Profiles survive server restart via `data/profiles.pkl` |
+| Frontend | JS `performance.now()` capture at sub-millisecond precision |
+| Privacy | Raw keystrokes never stored; activity log stores scores only |
 
----
+**Observed Performance (manual demo testing):**
 
-### 1. INTRODUCTION
-
-#### 1.1 Motivation
-
-Traditional authentication methods (passwords, PINs) suffer from several limitations:
-* Vulnerable to theft, phishing, and social engineering
-* Can be forgotten, shared, or compromised
-* Provide only point-of-entry security
-
-Behavioral biometrics offers **continuous authentication** capabilities and serves as an additional security layer that's difficult to replicate.
-
-#### 1.2 Problem Statement
-
-Develop a typing pattern authentication system that:
-* Extracts discriminative features from keystroke dynamics
-* Creates unique user profiles from minimal training data
-* Authenticates users with high accuracy and low latency
-* Provides standardized API for integration
-* Respects privacy and regulatory requirements
-
-#### 1.3 Objectives
-
-1. Implement feature extraction for keystroke dynamics (13 features)
-2. Design statistical profiling and matching algorithms
-3. Create REST API with standardized response format
-4. Build interactive demo for real-time testing
-5. Evaluate performance characteristics and limitations
-6. Document security and privacy considerations
+| Scenario | Confidence Range | Decision |
+|----------|-----------------|----------|
+| Same user, consistent rhythm | 0.72 – 0.85 | pass |
+| Different user, same phrase | 0.35 – 0.55 | fail |
+| Same user, deliberate rhythm change | 0.55 – 0.65 | inconclusive / fail |
 
 ---
 
-### 2. LITERATURE REVIEW & BACKGROUND
+## 1. INTRODUCTION
 
-#### 2.1 Keystroke Dynamics
+### 1.1 Motivation
 
-**Keystroke dynamics** analyzes the timing patterns of typing behavior:
-* **Dwell time**: Duration a key is pressed (release_time - press_time)
-* **Flight time**: Interval between consecutive keystrokes
-* **Digraph timing**: Time between specific key pairs
-* **Typing rhythm**: Overall speed and cadence
+Traditional authentication methods — passwords, PINs, OTPs — provide only point-of-entry security. They are vulnerable to phishing, credential stuffing, and shoulder surfing. Once breached, they offer no ongoing protection.
 
-Research shows these patterns are relatively stable for individuals but vary significantly across users.
+**Behavioral biometrics** solves a different problem: it authenticates *how* a person interacts with a device, not just *what they know*. Keystroke dynamics in particular are:
 
-#### 2.2 Authentication Approaches
+- **Passive** — no additional hardware or user action required
+- **Continuous** — can be applied throughout a session, not just at login
+- **Hard to replicate** — rhythm is subconscious and difficult to mimic precisely
+- **Low cost** — browser `keydown`/`keyup` events are sufficient input
 
-**Statistical Methods:**
-* Profile creation using mean, standard deviation, percentiles
-* Distance metrics: Euclidean, Manhattan, Mahalanobis
-* Threshold-based decision making
+### 1.2 Problem Statement
 
-**Machine Learning:**
-* Neural networks for pattern recognition
-* Random forests for classification
-* Anomaly detection algorithms
+Build a local typing pattern authentication system that:
 
-This project uses **statistical profiling with normalized Euclidean distance** for transparency and interpretability.
+1. Captures keystroke timing at millisecond precision from a browser
+2. Extracts a discriminative 24-dimensional feature vector from raw timing events
+3. Enrolls a user profile from ≥ 3 typing sessions
+4. Verifies subsequent sessions against that profile using a 4-algorithm ML ensemble
+5. Returns standardized pass / inconclusive / fail decisions with confidence scores
+6. Persists profiles across server restarts and logs all events to an audit trail
 
-#### 2.3 Regulatory Landscape
+### 1.3 Scope
 
-* **GDPR (Europe)**: Requires explicit consent for biometric processing
-* **BIPA (Illinois)**: Mandates written consent and data retention policies
-* **CCPA (California)**: Provides opt-out rights for biometric data
-
-Our implementation emphasizes **statistical templates** rather than raw keystroke storage to minimize privacy impact.
+This is an educational demo. It runs fully locally — no database, no Docker, no cloud. Security tradeoffs (unauthenticated endpoints, pickle serialization, open CORS) are acknowledged and appropriate for this scope.
 
 ---
 
-### 3. SYSTEM ARCHITECTURE
+## 2. LITERATURE REVIEW & BACKGROUND
 
-#### 3.1 Component Overview
+### 2.1 Keystroke Dynamics
+
+Keystroke dynamics was first studied formally by Gaines et al. (1980) and formalized by Joyce & Gupta (1990) as a biometric modality. The core insight is that each individual's typing rhythm is statistically stable within a person and discriminative across people.
+
+**Core timing signals:**
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    CLIENT LAYER                         │
-│  ┌──────────────────┐      ┌──────────────────┐       │
-│  │  Streamlit Demo  │      │   External Apps  │       │
-│  └────────┬─────────┘      └────────┬─────────┘       │
-└───────────┼────────────────────────┼─────────────────┘
-            │                         │
-            └────────────┬────────────┘
+  Key A pressed          Key A released      Key B pressed
+       |                      |                   |
+  ─────▼──────────────────────▼───────────────────▼──────────▶ time
+       |◄────── Dwell Time ──►|◄── Flight Time ──►|
+       |                                           |
+       |◄──────────── Digraph Time ───────────────►|
+```
+
+- **Dwell time**: How long a key is held (`release_time - press_time`)
+- **Flight time**: Gap between releasing one key and pressing the next
+- **Digraph time**: Press-to-press latency for consecutive key pairs
+
+### 2.2 Authentication Approaches
+
+**Statistical Methods** — profile as mean/std per feature, compute normalized distance at verify time. Fast, interpretable, low data requirement. Used as the primary signal in this project (z-score component, weight 0.35).
+
+**Anomaly Detection** — treat enrolled samples as the inlier distribution; flag deviations as impostors. Isolation Forest (Liu et al., 2008) and One-Class SVM (Schölkopf et al., 2001) implement this without requiring negative (impostor) training data — essential for a one-class enrollment scenario.
+
+**Deep Learning** — LSTM and Transformer approaches (TypeNet, Acien et al. 2021) show EER < 3% on large datasets. Out of scope due to data requirements.
+
+### 2.3 Why a 4-Algorithm Ensemble?
+
+A single algorithm has known failure modes at small enrollment sizes:
+
+| Algorithm | Weakness at N=3 sessions |
+|-----------|--------------------------|
+| Z-score only | Sensitive to non-Gaussian feature distributions |
+| IsolationForest only | Unreliable with fewer than 10 samples |
+| One-Class SVM only | Sensitive to RBF kernel bandwidth |
+| Nearest-sample only | Fails when enrollment samples have high variance |
+
+Combining all four with calibrated weights produces a more robust decision boundary.
+
+### 2.4 Regulatory Context
+
+- **GDPR (Europe)**: Requires explicit consent for biometric processing; data minimisation (Article 5(1)(c))
+- **BIPA (Illinois)**: Mandates written consent and data retention policies
+- **CCPA (California)**: Provides opt-out rights for biometric data
+
+This implementation stores statistical templates (feature vectors), not raw keystrokes — aligned with data minimisation principles.
+
+---
+
+## 3. SYSTEM ARCHITECTURE
+
+### 3.1 Full Stack Diagram
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                        CLIENT LAYER                            │
+│                                                                │
+│  ┌─────────────────────────┐   ┌──────────────────────────┐   │
+│  │    demo/capture.html    │   │  demo/streamlit_app.py   │   │
+│  │  JS keydown/keyup       │   │  Enroll + Verify UI      │   │
+│  │  performance.now()      │   │  Score display           │   │
+│  └────────────┬────────────┘   └────────────┬─────────────┘   │
+└───────────────┼─────────────────────────────┼─────────────────┘
+                │  HTTP POST (JSON)            │  HTTP
+                ▼                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│                  API LAYER  (app/main.py)                      │
+│                                                                │
+│  GET /health    GET /version    GET /users                     │
+│  GET /profile/{user_id}                                        │
+│  POST /enroll_typing            POST /verify_typing            │
+│                                                                │
+│  FastAPI + Uvicorn · Pydantic schemas · CORS middleware        │
+│  StandardResponse shape on every endpoint                      │
+│  startup() event loads profiles.pkl into memory               │
+└────────────────────────────┬───────────────────────────────────┘
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│               SERVICE LAYER  (app/services.py)                 │
+│                                                                │
+│  TypingBiometricsService                                       │
+│  ├── extract_features()   → 24-D numpy array                  │
+│  ├── enroll_user()        → fit scaler + IsoForest + OC-SVM   │
+│  ├── authenticate()       → 4-algorithm ensemble vote         │
+│  ├── _save_profiles()     → pickle to data/profiles.pkl       │
+│  ├── _load_profiles()     → unpickle on init                  │
+│  └── _log()               → append to data/activity_log.jsonl │
+└────────────────────────────┬───────────────────────────────────┘
+                             │
+                             ▼
+┌────────────────────────────────────────────────────────────────┐
+│               STORAGE LAYER  (app/storage.py)                  │
+│                                                                │
+│  data/profiles.pkl         enrolled user profiles (pickle)    │
+│  data/activity_log.jsonl   audit log (append-only JSONL)      │
+│  data/.gitkeep             keeps data/ tracked; files ignored  │
+└────────────────────────────────────────────────────────────────┘
+```
+
+### 3.2 Request Lifecycle
+
+```
+  Browser types fixed phrase
+          |
+          ▼
+  JS collects {key, press_time, release_time} per keystroke
+          |
+          ▼
+  POST /enroll_typing  OR  POST /verify_typing
+  body: { user_id, sessions: [ { keystrokes: [...] } ] }
+          |
+          ▼
+  main.py validates with Pydantic schema
+          |
+          ▼
+  services.py::extract_features()
+  → 24-D feature vector per session
+          |
+          ├────────────────────────────────────┐
+          ▼                                    ▼
+   ENROLL path                          VERIFY path
+   ─────────────                        ───────────
+   fit StandardScaler                   transform features
+   fit IsolationForest                  run 4 algorithms
+   fit OneClassSVM                      blend scores
+   store profile dict                   return confidence
+   _save_profiles() → pkl               _log() → jsonl
+          |                                    |
+          └──────────────┬─────────────────────┘
                          ▼
-┌─────────────────────────────────────────────────────────┐
-│                    API LAYER (FastAPI)                  │
-│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐  │
-│  │ /health │  │/version │  │ /enroll │  │ /verify │  │
-│  └─────────┘  └─────────┘  └─────────┘  └─────────┘  │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│                   SERVICE LAYER                         │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │  TypingBiometricsService                     │    │
-│  │  • extract_features()                        │    │
-│  │  • create_profile()                          │    │
-│  │  • calculate_distance()                      │    │
-│  │  • authenticate()                            │    │
-│  └─────────────────────────────────────────────────┘    │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│                   STORAGE LAYER                         │
-│  ┌──────────────────┐      ┌──────────────────┐       │
-│  │  User Profiles   │      │  Session Logs    │       │
-│  │  (JSON + pickle) │      │  (JSON)          │       │
-│  └──────────────────┘      └──────────────────┘       │
-└─────────────────────────────────────────────────────────┘
+               StandardResponse JSON
+               { module, score, decision,
+                 confidence, metadata,
+                 activity_event, latency_ms }
 ```
 
-#### 3.2 Technology Stack
+### 3.3 Technology Stack
 
-* **Backend**: FastAPI (Python 3.8+)
-* **Frontend**: Streamlit
-* **ML Libraries**: NumPy, SciPy (statistics)
-* **Storage**: Local filesystem (JSON + pickle)
-* **Testing**: pytest
-* **API Documentation**: OpenAPI/Swagger
+| Layer | Technology |
+|-------|-----------|
+| Backend | Python 3.10+, FastAPI, Uvicorn |
+| Frontend capture | HTML + JavaScript (`performance.now()`) |
+| Demo UI | Streamlit |
+| ML | scikit-learn: `IsolationForest`, `OneClassSVM`, `StandardScaler` |
+| Numerics | NumPy |
+| Persistence | pickle (`profiles.pkl`), JSONL (`activity_log.jsonl`) |
+| Testing | pytest, pytest-asyncio |
+| API docs | OpenAPI / Swagger at `/docs` |
 
 ---
 
-### 4. METHODOLOGY
+## 4. FEATURE ENGINEERING
 
-#### 4.1 Feature Extraction
+### 4.1 Raw Input
 
-From raw keystroke events, we extract **13 discriminative features**:
+The JavaScript capture page records one event per keystroke:
 
-**Dwell Time Features (5):**
-1. Mean dwell time
-2. Standard deviation of dwell time
-3. Median dwell time
-4. 25th percentile dwell time
-5. 75th percentile dwell time
-
-**Flight Time Features (3):**
-6. Mean flight time (time between consecutive key presses)
-7. Standard deviation of flight time
-8. Median flight time
-
-**Digraph Timing Features (4):**
-9. Mean digraph time (for common key pairs)
-10. Standard deviation of digraph time
-11. Maximum digraph time
-12. Minimum digraph time
-
-**Typing Rhythm (1):**
-13. Keys per second (overall typing speed)
-
-#### 4.2 Profile Creation (Enrollment)
-
-**Algorithm:**
-```
-Input: 3-5 typing sessions from user
-Output: Statistical profile
-
-1. FOR each session:
-   a. Extract 13 features
-   b. Store feature vector
-
-2. Aggregate across sessions:
-   a. Calculate mean for each feature
-   b. Calculate std deviation for each feature
-   c. Calculate median for each feature
-   d. Count total samples
-
-3. Store profile:
-   {
-     'mean': [f1_mean, f2_mean, ..., f13_mean],
-     'std': [f1_std, f2_std, ..., f13_std],
-     'median': [f1_median, ..., f13_median],
-     'samples': N
-   }
+```json
+{ "key": "t", "press_time": 1024.3, "release_time": 1089.7 }
 ```
 
-**Requirements:**
-* Minimum 3 sessions (better with 5)
-* Each session: 30+ characters
-* Same text for consistency
+`press_time` and `release_time` are `performance.now()` values in milliseconds.
 
-#### 4.3 Authentication Algorithm
+### 4.2 Derived Timing Signals
 
-**Distance Calculation:**
-```python
-# Normalized Euclidean Distance
-distance = sqrt(sum(((test_features[i] - profile_mean[i]) / profile_std[i])^2))
-             / sqrt(num_features)
+```
+Keystrokes:  [A]──────[B]──────[C]
+             press release press release
+
+Dwell(A)    = release(A) - press(A)
+Flight(A→B) = press(B)   - release(A)
+Digraph(A→B)= press(B)   - press(A)
 ```
 
-**Confidence Score:**
-```python
-# Convert distance to similarity score
-max_distance = 3.0  # Typical max for normalized distance
-confidence = max(0, 1 - (distance / max_distance))
-```
+### 4.3 24-Dimensional Feature Vector
 
-**Decision Thresholds:**
-* **PASS**: confidence ≥ 0.7 (70%)
-* **INCONCLUSIVE**: 0.6 ≤ confidence < 0.7 (60-70%)
-* **FAIL**: confidence < 0.6 (below 60%)
+| Index | Group | Feature |
+|-------|-------|---------|
+| 0 | Dwell | Mean dwell time |
+| 1 | Dwell | Std deviation of dwell time |
+| 2 | Dwell | Median dwell time |
+| 3 | Dwell | 25th percentile dwell time |
+| 4 | Dwell | 75th percentile dwell time |
+| 5 | Flight | Mean flight time |
+| 6 | Flight | Std deviation of flight time |
+| 7 | Flight | Median flight time |
+| 8 | Digraph | Mean digraph time |
+| 9 | Digraph | Std deviation of digraph time |
+| 10 | Digraph | Max digraph time |
+| 11 | Digraph | Min digraph time |
+| 12 | Rhythm | Typing speed (keystrokes/sec × 1000) |
+| 13 | Behavior | Backspace rate (backspaces / total keys) |
+| 14 | Pause | Pause count (flight time > 500 ms) |
+| 15 | Pause | Average pause duration |
+| 16 | Dwell | Max dwell time |
+| 17 | Dwell | Min dwell time |
+| 18 | Flight | Max flight time |
+| 19 | Flight | Min flight time |
+| 20 | Dwell | Variance of dwell time |
+| 21 | Session | Total session duration (ms) |
+| 22 | Pause | Pause ratio (pauses / total flight intervals) |
+| 23 | Behavior | Raw backspace count |
+
+**Phrase-dependence:** Features 0–11 (dwell, flight, digraph) are digraph-specific — they change with the typed phrase. Features 12–15 and 21–23 (speed, backspace, pause, duration) are phrase-agnostic and remain discriminative across different text.
 
 ---
 
-### 5. IMPLEMENTATION DETAILS
+## 5. ML ENSEMBLE — ENROLLMENT
 
-#### 5.1 API Endpoints
+### 5.1 Enrollment Flow
 
-**Health & Metadata:**
-* `GET /health` - System health check
-* `GET /version` - Module metadata and feature list
+```
+  3+ typing sessions
+        |
+        ▼
+  extract_features() per session
+  → matrix shape: (N_sessions × 24)
+        |
+        ▼
+  StandardScaler.fit_transform(matrix)
+  → zero-mean, unit-variance scaled matrix
+        |
+        ├──► IsolationForest(contamination=0.1, random_state=42).fit(scaled)
+        |
+        └──► OneClassSVM(kernel='rbf', gamma='auto', nu=0.1).fit(scaled)
+        |
+        ▼
+  Store in user_profiles[user_id]:
+  {
+    "mean":        np.mean(matrix, axis=0),
+    "std":         np.std(matrix, axis=0) + 1e-6,
+    "samples":     [fv1, fv2, fv3, ...],
+    "scaler":      StandardScaler instance,
+    "iso_model":   IsolationForest instance,
+    "oc_svm":      OneClassSVM instance,
+    "enrolled_at": ISO timestamp,
+    "sample_count": N
+  }
+        |
+        ▼
+  _save_profiles() → data/profiles.pkl
+```
 
-**Core Operations:**
-* `POST /enroll` - Enroll new user with typing samples
-* `POST /verify` - Authenticate user based on typing pattern
+**Why one-class classifiers?** Both IsolationForest and OneClassSVM learn only from the enrolled user's samples. They require no impostor data — which is unavailable at enrollment time. This is the correct paradigm for biometric enrollment.
 
-**User Management:**
-* `GET /users` - List all enrolled users
-* `GET /profile/{user_id}` - Get user profile statistics
+---
 
-#### 5.2 Standard Response Format
+## 6. ML ENSEMBLE — VERIFICATION
 
-All authentication operations return:
+### 6.1 Four-Algorithm Voting Pipeline
+
+```
+  Incoming session keystrokes
+            |
+            ▼
+     extract_features()
+     → test vector x  (shape: 24,)
+            |
+     ┌──────┴─────────────────────────────────┐
+     |                                        |
+     ▼                                        ▼
+  ┌──────────────────────┐      ┌─────────────────────────┐
+  │  Algorithm 1         │      │  Algorithm 2            │
+  │  Z-Score Similarity  │      │  Nearest Sample Sim.    │
+  │                      │      │                         │
+  │  z = ||(x-μ)/σ||     │      │  For each enrolled sᵢ:  │
+  │  sim = 1-(z/5.0)     │      │  d = ||(x-sᵢ)/σ||/3.0  │
+  │  clip to [0,1]       │      │  nearest = max(1-d)     │
+  │                      │      │  clip to [0,1]          │
+  │  Weight: 0.35        │      │  Weight: 0.25           │
+  └──────────┬───────────┘      └──────────┬──────────────┘
+             |                             |
+  ┌──────────┴───────────┐      ┌──────────┴──────────────┐
+  │  Algorithm 3         │      │  Algorithm 4            │
+  │  Isolation Forest    │      │  One-Class SVM          │
+  │                      │      │                         │
+  │  scaler.transform(x) │      │  scaler.transform(x)    │
+  │  decision_function() │      │  predict()              │
+  │  iso_norm =          │      │  1.0 if inlier          │
+  │  clip(score+0.5,0,1) │      │  0.0 if outlier         │
+  │                      │      │                         │
+  │  Weight: 0.20        │      │  Weight: 0.20           │
+  └──────────┬───────────┘      └──────────┬──────────────┘
+             |                             |
+             └──────────────┬──────────────┘
+                            ▼
+       confidence = 0.35 × z_sim
+                  + 0.25 × nearest
+                  + 0.20 × iso_norm
+                  + 0.20 × svm_score
+       confidence = clip(confidence, 0.0, 1.0)
+                            |
+               ┌────────────┼─────────────┐
+               ▼            ▼             ▼
+           >= 0.70      0.60–0.70      < 0.60
+            PASS       INCONCLUSIVE    FAIL
+```
+
+### 6.2 Weight Rationale
+
+| Algorithm | Weight | Rationale |
+|-----------|--------|-----------|
+| Z-score | **0.35** | Most interpretable; measures deviation from enrolled mean in normalized space; most reliable at N=3 |
+| Nearest sample | **0.25** | Captures within-session variance; robust to outlier enrollment sessions |
+| Isolation Forest | **0.20** | Adds nonlinear decision boundary; less reliable at N=3 → lower weight |
+| One-Class SVM | **0.20** | Kernel-based similarity; binary output means lower score granularity |
+
+### 6.3 Decision Thresholds
+
+```
+  0.0          0.60         0.70          1.0
+   |────────────|────────────|─────────────|
+   |    FAIL    |INCONCLUSIVE|    PASS     |
+   └────────────┴────────────┴─────────────┘
+```
+
+---
+
+## 7. API REFERENCE
+
+### 7.1 Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Returns `{"status": "ok", "module": "typing_biometrics", "version": "0.1.0"}` |
+| GET | `/version` | Module metadata and feature list |
+| GET | `/users` | List all enrolled user IDs |
+| GET | `/profile/{user_id}` | Profile summary (sample count, enrolled_at, feature means) |
+| POST | `/enroll_typing` | Enroll user from ≥ 3 sessions |
+| POST | `/verify_typing` | Verify session against enrolled profile |
+
+### 7.2 Standard Response Shape
+
 ```json
 {
   "module": "typing_biometrics",
-  "score": 0.87,
+  "score": 0.74,
   "decision": "pass",
-  "confidence": 0.82,
-  "metadata": {"threshold": 0.7},
+  "confidence": 0.74,
+  "metadata": {
+    "threshold": 0.7,
+    "authenticated": true
+  },
   "activity_event": {
-    "event_id": "evt_a3b7c9d2",
-    "user_id": "demo_user",
+    "event_id": "evt_a1b2c3d4",
+    "user_id": "alice",
+    "module": "typing_biometrics",
     "action": "verify",
     "result": "pass",
-    "score": 0.87,
-    "timestamp": "2026-05-19T08:00:00Z"
+    "score": 0.74,
+    "timestamp": "2026-06-26T10:00:00Z"
   },
-  "latency_ms": 245
+  "latency_ms": 18
 }
 ```
 
-**Benefits:**
-* Consistent interface across modules
-* Activity logging for audit trails
-* Performance monitoring built-in
-* Standardized error handling
-
-#### 5.3 Data Storage
-
-**User Profiles:** `data/user_profiles.pkl`
-* Pickle format for efficient NumPy array storage
-* Contains statistical templates only
-* No raw keystroke data stored
-
-**Session Logs:** `data/sessions/{user_id}.json`
-* Authentication attempts with timestamps
-* Confidence scores and decisions
-* For analysis and debugging
-
-**Security Measures:**
-* All data files gitignored
-* No sensitive PII stored
-* Feature vectors don't reveal typed content
-
----
-
-### 6. RESULTS & PERFORMANCE
-
-#### 6.1 Performance Characteristics
-
-**Accuracy Metrics:**
-* **False Accept Rate (FAR)**: 5-10%
-  - Probability of accepting impostor
-  - Measured across different users
-
-* **False Reject Rate (FRR)**: 10-15%
-  - Probability of rejecting legitimate user
-  - Varies with fatigue, device, stress
-
-* **Equal Error Rate (EER)**: ~12%
-  - Point where FAR = FRR
-  - Industry benchmark
-
-**Latency:**
-* Feature extraction: 50-100ms
-* Profile matching: 100-150ms
-* Total authentication: 200-300ms
-* Well within acceptable limits (<500ms)
-
-#### 6.2 Factors Affecting Accuracy
-
-**User Factors:**
-* Typing skill level (hunt-and-peck vs. touch typing)
-* Fatigue and stress levels
-* Time of day and alertness
-* Physical condition (injury, illness)
-
-**Environmental Factors:**
-* Keyboard type (mechanical, laptop, virtual)
-* Device characteristics (key travel, resistance)
-* Working posture and ergonomics
-* Distractions and multitasking
-
-**Data Factors:**
-* Number of enrollment samples (3 vs. 5)
-* Text consistency and length
-* Time between enrollment and authentication
-
-#### 6.3 Comparison with Alternatives
-
-| Method | FAR | FRR | Latency | Cost |
-|--------|-----|-----|---------|------|
-| **Typing Biometrics** | 5-10% | 10-15% | 200ms | Low |
-| Fingerprint | 0.1-1% | 1-3% | 100ms | Medium |
-| Face Recognition | 0.1-5% | 2-10% | 500ms | Medium |
-| Voice Recognition | 2-5% | 5-10% | 1000ms | Low |
-| Password Only | Variable | 0% | <50ms | Low |
-
-**Trade-offs:**
-* Higher error rates than physiological biometrics
-* No special hardware required
-* Continuous authentication capability
-* User-friendly (no explicit action needed)
-
----
-
-### 7. SECURITY & PRIVACY CONSIDERATIONS
-
-#### 7.1 Threat Model
-
-**Potential Attacks:**
-
-1. **Replay Attack**
-   - Attacker records legitimate typing session
-   - Attempts to replay for authentication
-   - **Mitigation**: Add challenge-response, timestamps
-
-2. **Mimicry Attack**
-   - Attacker practices imitating victim's typing
-   - **Mitigation**: Multi-factor authentication
-
-3. **Statistical Attack**
-   - Attacker analyzes profile structure
-   - **Mitigation**: Secure storage, encryption
-
-4. **Trojan/Keylogger**
-   - Malware captures raw keystroke data
-   - **Mitigation**: System-level security
-
-#### 7.2 Privacy Protection
-
-**Data Minimization:**
-* Store statistical aggregates, not raw keystrokes
-* Feature vectors don't reveal typed content
-* Regular data retention reviews
-
-**Regulatory Compliance:**
-* Obtain explicit user consent
-* Provide clear privacy policy
-* Enable data deletion requests
-* Implement access controls
-
-**Best Practices:**
-* Never use as sole authentication factor
-* Combine with traditional passwords
-* Implement anomaly detection
-* Regular profile updates
-
-#### 7.3 Ethical Considerations
-
-* **Transparency**: Users must know they're being monitored
-* **Consent**: Explicit opt-in required
-* **Fairness**: Consider users with disabilities
-* **Purpose Limitation**: Use only for authentication
-
----
-
-### 8. LIMITATIONS & CONSTRAINTS
-
-#### 8.1 Technical Limitations
-
-1. **Variability**: Typing patterns change over time
-2. **Device Dependence**: Different keyboards affect patterns
-3. **Context Sensitivity**: Stress, fatigue impact performance
-4. **Cold Start**: Requires 3-5 enrollment sessions
-5. **Text Dependence**: Works best with consistent text
-
-#### 8.2 Deployment Constraints
-
-**This Implementation:**
-* ✗ Not production-ready
-* ✗ No database infrastructure
-* ✗ No Docker deployment
-* ✗ No cloud integration
-* ✗ No production authentication
-* ✓ Educational demonstration only
-* ✓ Local file storage
-* ✓ Suitable for learning and prototyping
-
-**Production Requirements:**
-* Encrypted database storage
-* Distributed architecture
-* Rate limiting and DDoS protection
-* Comprehensive logging and monitoring
-* Regular security audits
-* Compliance certifications
-
-#### 8.3 Use Case Suitability
-
-**Appropriate Use Cases:**
-* Secondary/continuous authentication
-* Fraud detection in banking
-* Exam proctoring and identity verification
-* Access control for sensitive systems
-
-**Inappropriate Use Cases:**
-* Sole authentication mechanism
-* High-security government systems
-* Life-critical applications
-* Real-time gaming authentication
-
----
-
-### 9. FUTURE ENHANCEMENTS
-
-#### 9.1 Short-Term Improvements
-
-1. **Adaptive Thresholds**
-   - User-specific decision boundaries
-   - Context-aware scoring
-
-2. **Additional Features**
-   - Key press force (if available)
-   - Multi-touch patterns for mobile
-   - Backspace/correction patterns
-
-3. **Profile Updates**
-   - Continuous learning from successful authentications
-   - Drift detection and adaptation
-
-4. **Enhanced UI**
-   - Real-time feedback during enrollment
-   - Visualization of typing patterns
-
-#### 9.2 Long-Term Research Directions
-
-1. **Deep Learning Approaches**
-   - LSTM networks for temporal patterns
-   - Autoencoders for anomaly detection
-   - Transfer learning across users
-
-2. **Multi-Modal Fusion**
-   - Combine with mouse dynamics
-   - Integrate with behavioral patterns (navigation)
-   - Fusion with physiological biometrics
-
-3. **Explainable AI**
-   - Visualize which features contributed to decision
-   - Provide confidence explanations
-   - User-friendly feedback
-
-4. **Privacy-Preserving Techniques**
-   - Federated learning for profile updates
-   - Homomorphic encryption for matching
-   - Zero-knowledge proofs
-
----
-
-### 10. CONCLUSION
-
-This project demonstrates a **complete behavioral biometrics system** based on keystroke dynamics analysis. The implementation successfully:
-
-1. ✅ Extracts 13 discriminative features from typing patterns
-2. ✅ Creates statistical user profiles from minimal training data
-3. ✅ Authenticates users with reasonable accuracy (FAR: 5-10%, FRR: 10-15%)
-4. ✅ Provides standardized REST API with activity logging
-5. ✅ Delivers interactive demo for real-time testing
-6. ✅ Documents security, privacy, and ethical considerations
-
-**Key Learnings:**
-* Behavioral biometrics offers continuous authentication capabilities
-* Statistical methods provide interpretable and efficient solutions
-* Privacy and consent are paramount considerations
-* Typing biometrics work best as secondary authentication
-* Real-world deployment requires significant additional infrastructure
-
-**Practical Applications:**
-The system demonstrates patterns applicable to:
-* Financial transaction verification
-* Continuous authentication in remote work
-* Academic integrity in online assessments
-* Access control for sensitive data
-
-**Academic Value:**
-This project provides hands-on experience with:
-* Feature engineering for temporal data
-* Statistical profiling and distance metrics
-* REST API design and standardization
-* Security and privacy considerations in biometric systems
-* Software engineering best practices
-
----
-
-### 11. REFERENCES & FURTHER READING
-
-**Foundational Papers:**
-1. Gaines, R.S., et al. (1980). "Authentication by Keystroke Timing: Some Preliminary Results"
-2. Joyce, R. & Gupta, G. (1990). "Identity Authentication Based on Keystroke Latencies"
-3. Monrose, F. & Rubin, A. (2000). "Keystroke Dynamics as a Biometric for Authentication"
-
-**Recent Advances:**
-4. Teh, P.S., et al. (2020). "A Survey of Keystroke Dynamics Biometrics" - Comprehensive review
-5. Acien, A., et al. (2021). "TypeNet: Deep Learning Keystroke Biometrics" - Neural approaches
-
-**Privacy & Regulation:**
-6. European Commission (2018). "General Data Protection Regulation (GDPR)"
-7. Illinois General Assembly (2008). "Biometric Information Privacy Act (BIPA)"
-
-**Technical Resources:**
-8. FastAPI Documentation: https://fastapi.tiangolo.com/
-9. NumPy User Guide: https://numpy.org/doc/
-10. Streamlit Documentation: https://docs.streamlit.io/
-
-**Security Standards:**
-11. NIST Special Publication 800-63B: "Digital Identity Guidelines - Authentication"
-12. ISO/IEC 24745:2011: "Biometric Template Protection"
-
----
-
-### APPENDIX A: PROJECT DELIVERABLES
-
-**Source Code:**
-* `/typing_biometrics/app/` - Backend API (4 Python modules)
-* `/typing_biometrics/demo/` - Streamlit demo
-* `/typing_biometrics/tests/` - Unit tests
-
-**Documentation:**
-* `README.md` - Installation and usage guide
-* `report.md` - Technical documentation (this file)
-* Notebook cells - Theoretical explanations
-
-**Data:**
-* `requirements.txt` - Python dependencies
-* `.gitignore` - Version control configuration
-* `data/` - Local storage (gitignored)
-
-**Total Lines of Code:** ~1,200 (Python)
-**Documentation:** ~3,000 words
-**Time Investment:** 15-20 hours
-
----
-
-### APPENDIX B: USAGE QUICK START
+### 7.3 curl Examples
 
 ```bash
-# 1. Installation
-cd /Workspace/Users/lokanshu20@gmail.com/typing_biometrics
-pip install -r requirements.txt
+# Health check
+curl http://localhost:8000/health
 
-# 2. Start API Server
-cd app
-python main.py
-# Access: http://localhost:8000
-# Docs: http://localhost:8000/docs
-
-# 3. Run Demo (in new terminal)
-streamlit run demo/streamlit_app.py
-# Access: http://localhost:8501
-
-# 4. Run Tests
-pytest tests/ -v
-```
-
----
-
-### APPENDIX C: API EXAMPLES
-
-**Enroll User:**
-```bash
-curl -X POST http://localhost:8000/enroll \
+# Enroll
+curl -X POST http://localhost:8000/enroll_typing \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "alice", "sessions": [...]}'  
-```
+  -d '{"user_id": "alice", "sessions": [{"keystrokes": [...]}]}'
 
-**Verify User:**
-```bash
-curl -X POST http://localhost:8000/verify \
+# Verify
+curl -X POST http://localhost:8000/verify_typing \
   -H "Content-Type: application/json" \
-  -d '{"user_id": "alice", "session": {...}}'
-```
+  -d '{"user_id": "alice", "session": {"keystrokes": [...]}}'
 
-**List Users:**
-```bash
+# List users
 curl http://localhost:8000/users
 ```
 
 ---
 
-**END OF REPORT**
+## 8. PERSISTENCE & AUDIT LOGGING
 
-*This report was prepared for academic/professional submission.*  
-*Project: Behavioral Biometrics - Typing Pattern Authentication*  
-*Date: May 19, 2026*  
-*System Type: Educational Demonstration*
+### 8.1 Profile Persistence Flow
+
+```
+  Server starts
+       |
+       ▼
+  startup() event fires
+       |
+       ▼
+  storage.load_user_profiles()
+       |
+       ├── data/profiles.pkl exists?
+       |        YES                  NO
+       |         |                   |
+       |         ▼                   ▼
+       |   unpickle dict         empty dict {}
+       |         |
+       └── biometrics_service.user_profiles = dict
+       |
+       ▼
+  [server handles requests]
+       |
+  POST /enroll_typing succeeds
+       |
+       ▼
+  _save_profiles() → pickle.dump → data/profiles.pkl
+       |
+       ▼
+  Server restart → profiles survive ✓
+```
+
+`_save_profiles()` is called after every successful enroll — not periodically. No enrolled data is lost even if the server crashes immediately after enrollment.
+
+### 8.2 Activity Log Format
+
+Every enroll and verify appends one JSONL line:
+
+```json
+{"event": "enroll", "user_id": "alice", "time": "2026-06-26T10:00:00"}
+{"event": "verify", "user_id": "alice", "confidence": 0.74, "result": true, "time": "2026-06-26T10:01:00"}
+```
+
+Raw keystrokes and typed text are **never written** to the log.
+
+---
+
+## 9. DEMO RUN COMMANDS
+
+```bash
+# 1. Clone and install
+git clone https://github.com/lokanshu7/typing_biometrics.git
+cd typing_biometrics
+pip install -r requirements.txt
+
+# 2. Start API (must run from inside app/ due to module imports)
+cd app
+uvicorn main:app --reload --port 8000
+
+# 3. Open keystroke capture page
+open ../demo/capture.html
+
+# 4. Start Streamlit demo (new terminal, from project root)
+streamlit run demo/streamlit_app.py
+
+# 5. Run tests
+pytest tests/ -v
+
+# 6. View Swagger docs
+open http://localhost:8000/docs
+```
+
+---
+
+## 10. TEST SUITE
+
+| Test | File | What it covers |
+|------|------|----------------|
+| `test_root` | test_api.py | Root endpoint returns correct message and dict type |
+| `test_enroll_user` | test_api.py | Enroll unique timestamped user with 3 sessions; assert decision membership |
+| Service tests | test_services.py | Feature extraction and profile logic at the service layer |
+
+Tests use `asyncio.run()` to call FastAPI endpoints directly — appropriate for unit testing without a running server.
+
+**Known gaps:** `/health` and `/version` tests missing; no server-restart persistence test; assertions are membership checks only.
+
+---
+
+## 11. RESULTS & PERFORMANCE
+
+### 11.1 Manual Demo Results
+
+| Test Case | Confidence | Decision |
+|-----------|-----------|----------|
+| Enrolled user, normal typing | 0.72 – 0.85 | pass |
+| Enrolled user, deliberate slow typing | 0.55 – 0.65 | inconclusive |
+| Different user, same phrase | 0.35 – 0.55 | fail |
+| Enrolled user, different phrase | 0.40 – 0.60 | fail / inconclusive |
+
+### 11.2 Comparison with Alternative Modalities
+
+| Modality | FAR (approx.) | FRR (approx.) | Hardware | Continuous auth |
+|----------|--------------|--------------|----------|-----------------|
+| **Typing biometrics** | ~8% | ~12% | None | Yes |
+| Fingerprint | 0.1–1% | 1–3% | Sensor | No |
+| Face recognition | 0.1–5% | 2–10% | Camera | Partial |
+| Voice recognition | 2–5% | 5–10% | Microphone | No |
+| Password only | Variable | 0% | None | No |
+
+*Literature estimates (Teh et al., 2020). This implementation's EER was not formally measured — insufficient test subjects for a statistically valid evaluation.*
+
+---
+
+## 12. SECURITY & PRIVACY
+
+### 12.1 Threat Model
+
+```
+ATTACK SURFACE
+──────────────
+1. Replay Attack
+   Attacker records legitimate POST body and replays it.
+   Status: VULNERABLE — no nonce or timestamp validation
+   Mitigation: Add per-session challenge token
+
+2. Mimicry Attack
+   Attacker practices imitating victim's typing rhythm.
+   Status: LOW RISK — sub-ms timing precision is hard to replicate consciously
+   Mitigation: Longer enrollment phrases; more features
+
+3. Client-Side Spoofing
+   Attacker crafts fake keystroke JSON with ideal timing values.
+   Status: VULNERABLE — no server-side plausibility checks
+   Mitigation: Validate dwell > 0, flight > 0, speed within human bounds
+
+4. Profile Exfiltration
+   Attacker reads data/profiles.pkl from disk.
+   Status: VULNERABLE — unencrypted; unsafe pickle deserialization
+   Mitigation: Encrypt at rest; replace pickle with JSON + numpy arrays
+```
+
+### 12.2 Privacy Design
+
+- Feature vectors stored, not raw keystrokes — typed content cannot be reconstructed
+- Activity log stores only scores and decisions, not timing sequences
+- `data/` is gitignored — no biometric data reaches GitHub
+- Aligned with GDPR Article 5(1)(c) data minimisation principle
+
+### 12.3 Known Security Tradeoffs (Demo Scope)
+
+| Issue | Status | Priority if productionised |
+|-------|--------|--------------------------|
+| CORS `allow_origins=["*"]` | Open | High — restrict to localhost |
+| Unauthenticated endpoints | Open | High — add API key header |
+| Pickle deserialization | Unsafe | High — replace with JSON |
+| No rate limiting | Open | Medium |
+| Client-side timing only | Spoofable | Medium |
+
+---
+
+## 13. LIMITATIONS
+
+1. **Keyboard and device dependency.** Dwell and flight times differ substantially across keyboard types. A profile enrolled on a laptop keyboard may fail on a mechanical keyboard or phone.
+
+2. **Fixed phrase requirement.** Features 0–11 (digraph-based) are phrase-specific. Changing the enrollment phrase degrades accuracy significantly for ~50% of the feature vector.
+
+3. **Small enrollment set.** IsolationForest and One-Class SVM are unreliable at N < 10. EER improves significantly with 10+ sessions.
+
+4. **No formal EER measurement.** With a 2-person demo setup, Equal Error Rate cannot be computed. A proper evaluation requires 50+ users (e.g., CMU Keystroke Dynamics Dataset).
+
+5. **Typing pattern drift.** Rhythm changes over time with injury, fatigue, or new hardware. Profiles need periodic re-enrollment or adaptive updating.
+
+6. **Pickle security.** `profiles.pkl` uses Python pickle, which executes arbitrary code on deserialization from untrusted sources. Acceptable locally; unacceptable in production.
+
+---
+
+## 14. FUTURE ENHANCEMENTS
+
+### Short-Term
+
+1. Restrict CORS to `localhost` — single highest-priority security fix
+2. Replace pickle with JSON + base64 numpy — eliminates deserialization risk
+3. Raise enrollment minimum to 5 sessions — measurably improves IsoForest/SVM reliability
+4. Add `/health`, `/version`, and persistence restart tests
+5. Phrase-agnostic fallback — use only features 12–23 when phrase mismatch detected
+
+### Medium-Term
+
+6. Evaluate on CMU Keystroke Dataset — compute proper EER, FAR, FRR across 50+ users
+7. Adaptive profile updates — fold high-confidence verify sessions back into enrolled samples
+8. Mobile touch events — extend `capture.html` to `touchstart`/`touchend` for mobile
+
+### Long-Term Research Directions
+
+9. **LSTM/Transformer** — sequence models capture inter-key dependencies that fixed feature vectors miss. TypeNet achieves EER < 3% on large datasets.
+10. **Federated learning** — profile updates without sending raw features to a server
+11. **Multi-modal fusion** — combine with mouse dynamics or navigation patterns for continuous session authentication
+12. **Explainability** — surface which features drove a fail decision (e.g., "dwell time was 2σ above enrolled mean")
+
+---
+
+## 15. CONCLUSION
+
+This project delivers a complete, end-to-end behavioral biometrics demo covering the full engineering stack: browser-level keystroke capture, a 24-feature ML pipeline, a 4-algorithm weighted ensemble, a REST API with standardized response shape, profile persistence that survives server restarts, and an append-only audit log.
+
+The most significant technical contribution is the ensemble design — combining z-score distance (interpretable baseline, weight 0.35), nearest-sample matching (variance-aware, weight 0.25), Isolation Forest (nonlinear anomaly detection, weight 0.20), and One-Class SVM (kernel similarity, weight 0.20) — each weighted to reflect reliability at the small sample sizes typical of a demo enrollment scenario.
+
+The system demonstrates that meaningful behavioral biometrics is achievable with no specialized hardware, no database, and no cloud infrastructure, using only browser JavaScript and a standard Python ML stack.
+
+---
+
+## REFERENCES
+
+1. Gaines, R.S., et al. (1980). "Authentication by Keystroke Timing: Some Preliminary Results." RAND Corporation.
+2. Joyce, R. & Gupta, G. (1990). "Identity Authentication Based on Keystroke Latencies." *Communications of the ACM, 33(2).*
+3. Monrose, F. & Rubin, A. (2000). "Keystroke Dynamics as a Biometric for Authentication." *Future Generation Computer Systems, 16(4).*
+4. Teh, P.S., et al. (2020). "A Survey of Keystroke Dynamics Biometrics." *The Scientific World Journal.*
+5. Acien, A., et al. (2021). "TypeNet: Deep Learning Keystroke Biometrics." *IEEE Transactions on Biometrics, Behavior, and Identity Science.*
+6. Liu, F.T., et al. (2008). "Isolation Forest." *IEEE International Conference on Data Mining.*
+7. Schölkopf, B., et al. (2001). "Estimating the Support of a High-Dimensional Distribution." *Neural Computation.*
+8. European Commission (2018). *GDPR — Article 5(1)(c): Data Minimisation.*
+9. Illinois General Assembly (2008). *Biometric Information Privacy Act (BIPA).*
+
+---
+
+## APPENDIX A: PROJECT DELIVERABLES
+
+| File | Description |
+|------|-------------|
+| `app/main.py` | FastAPI app, all endpoints, startup event |
+| `app/schemas.py` | Pydantic request/response models |
+| `app/services.py` | Feature extraction, enrollment, ensemble verification |
+| `app/storage.py` | Local file read/write helpers |
+| `demo/capture.html` | JS keystroke capture page |
+| `demo/streamlit_app.py` | Interactive demo UI |
+| `tests/test_api.py` | API endpoint tests |
+| `tests/test_services.py` | Service layer unit tests |
+| `requirements.txt` | Pinned dependencies |
+| `pytest.ini` | pytest configuration |
+| `data/.gitkeep` | Keeps data/ tracked; actual files gitignored |
+| `README.md` | Installation and demo run guide |
+| `report.md` | This document |
+
+---
+
+*Project 7: Behavioral Biometrics — Typing Pattern Demo*
+*ByoSync · Kavion Intelligence Pvt. Ltd. · Internship 2026*
+*Submitted by: Lokanshu Tanwar*

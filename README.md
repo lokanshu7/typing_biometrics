@@ -1,201 +1,364 @@
 # Behavioral Biometrics: Typing Pattern Authentication
 
-**Learning Demo Project** - Keystroke dynamics analysis for behavioral biometrics
+> **An educational machine learning project demonstrating behavioral biometric authentication using keystroke dynamics, statistical profiling, and anomaly detection.**
 
-## ⚠️ Important: Demo System Only
+---
 
-This is an **educational demonstration** project for learning purposes:
-- ✗ NOT production-ready
-- ✗ No Docker, database servers, or cloud deployment
-- ✗ No production authentication, payments, or TLS
-- ✗ No claims about zero-biometric-storage protocols
-- ✓ Local file-based storage only (JSON + pickle)
-- ✓ All data files are gitignored
-- ✓ Should be used as SECONDARY authentication only
+## Overview
 
-## Features
+Behavioral biometrics identify users based on **how they interact with a system** rather than what they know (passwords) or what they possess (security tokens). One of the most widely studied behavioral biometric modalities is **keystroke dynamics**, where typing rhythm, timing, and interaction patterns are analyzed to authenticate users.
 
-- **Keystroke Dynamics Analysis**: 13-feature timing analysis
-- **ML-Based Pattern Matching**: Statistical profiling with distance metrics
-- **Standardized REST API**: Consistent response format with activity logging
-- **Interactive Demo**: Streamlit web interface
-- **Local Storage**: File-based persistence (no database required)
+This project demonstrates a complete typing biometrics authentication system that captures typing behavior, extracts statistical timing features, builds personalized user profiles, and verifies future typing sessions using a hybrid machine learning approach.
+
+The system is designed as an **educational and research-oriented implementation** that showcases backend API development, feature engineering, machine learning integration, and RESTful service design.
+
+---
+
+## Key Features
+
+* REST API built using **FastAPI**
+* Behavioral biometric authentication using **keystroke dynamics**
+* Hybrid authentication pipeline combining statistical profiling and machine learning
+* Extraction of 24 timing and behavioral features
+* User enrollment using multiple typing sessions
+* Confidence-based authentication decisions
+* Interactive Streamlit demonstration interface
+* Local file-based persistence using JSON and Pickle
+* Automated unit testing using Pytest
+* Standardized API responses with activity logging
+
+---
+
+## System Architecture
+
+```text
+Typing Session
+      │
+      ▼
+Keystroke Capture
+      │
+      ▼
+Feature Extraction
+      │
+      ▼
+User Enrollment
+      │
+      ▼
+Behavioral Profile
+      │
+      ▼
+Verification Request
+      │
+      ▼
+Hybrid Authentication Engine
+      │
+      ▼
+Confidence Score
+      │
+      ▼
+Pass / Inconclusive / Fail
+```
+
+---
+
+## Technology Stack
+
+| Category         | Technologies                    |
+| ---------------- | ------------------------------- |
+| Backend          | Python, FastAPI, Uvicorn        |
+| Machine Learning | NumPy, Scikit-learn             |
+| Models           | Isolation Forest, One-Class SVM |
+| Validation       | Pydantic                        |
+| Frontend         | Streamlit                       |
+| Storage          | JSON, Pickle                    |
+| Testing          | Pytest                          |
+
+---
 
 ## Project Structure
 
-```
+```text
 typing_biometrics/
+│
 ├── app/
-│   ├── main.py           # FastAPI with standard endpoints
-│   ├── schemas.py        # Pydantic models + standard responses
-│   ├── services.py       # ML and biometrics logic
-│   └── storage.py        # Local file storage
+│   ├── main.py
+│   ├── schemas.py
+│   ├── services.py
+│   ├── storage.py
+│   └── data/
+│
 ├── demo/
-│   └── streamlit_app.py  # Interactive demo
-├── data/                 # User profiles (gitignored)
+│   ├── capture.html
+│   └── streamlit_app.py
+│
+├── data/
+│
 ├── tests/
 │   ├── test_api.py
 │   └── test_services.py
+│
 ├── requirements.txt
-├── README.md
+├── pytest.ini
 ├── report.md
-└── .gitignore
+└── README.md
 ```
+
+---
 
 ## Installation
 
+Clone the repository
+
 ```bash
-cd /Workspace/Users/lokanshu20@gmail.com/typing_biometrics
+git clone https://github.com/lokanshu7/typing_biometrics.git
+cd typing_biometrics
+```
+
+Install dependencies
+
+```bash
 pip install -r requirements.txt
 ```
 
-## Usage
+---
 
-### Start the API Server
+## Running the Project
+
+Start the FastAPI server
 
 ```bash
-cd app
-python main.py
+python -m app.main
 ```
 
-API runs at `http://localhost:8000`
-API docs at `http://localhost:8000/docs`
+The API will be available at:
 
-### Run the Streamlit Demo
+```
+http://localhost:8000
+```
+
+Interactive API documentation:
+
+```
+http://localhost:8000/docs
+```
+
+Run the Streamlit application
 
 ```bash
 streamlit run demo/streamlit_app.py
 ```
 
-## API Endpoints
+---
 
-### Standard Endpoints
+## API Overview
 
-```
-GET  /health          Health check
-GET  /version         Module metadata
-POST /enroll          Enroll new user
-POST /verify          Authenticate user
-GET  /users           List enrolled users
-GET  /profile/{id}    Get user profile
-```
+| Method | Endpoint           | Description                    |
+| ------ | ------------------ | ------------------------------ |
+| GET    | /                  | API information                |
+| GET    | /health            | Health status                  |
+| GET    | /version           | Version information            |
+| POST   | /enroll_typing     | Enroll a new user              |
+| POST   | /verify_typing     | Verify a user's typing pattern |
+| GET    | /users             | List enrolled users            |
+| GET    | /profile/{user_id} | Retrieve user profile          |
 
-### Standard Response Format
+---
 
-All `/enroll` and `/verify` endpoints return:
+## Authentication Workflow
 
-```json
-{
-  "module": "typing_biometrics",
-  "score": 0.87,
-  "decision": "pass",  // pass | fail | inconclusive
-  "confidence": 0.82,
-  "metadata": {},
-  "activity_event": {
-    "event_id": "evt_a3b7c9d2",
-    "user_id": "demo_user",
-    "module": "typing_biometrics",
-    "action": "verify",
-    "purpose": "learning_demo",
-    "result": "pass",
-    "score": 0.87,
-    "timestamp": "2026-05-19T08:00:00Z"
-  },
-  "latency_ms": 245
-}
-```
+### Enrollment
 
-### Example: Enroll User
+1. Collect multiple typing sessions.
+2. Extract behavioral features.
+3. Normalize feature vectors.
+4. Train user-specific models.
+5. Store the behavioral profile.
 
-```bash
-curl -X POST http://localhost:8000/enroll \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "alice_demo",
-    "sessions": [
-      {
-        "user_id": "alice_demo",
-        "text": "The quick brown fox jumps over the lazy dog",
-        "keystrokes": [
-          {"key": "T", "press_time": 100, "release_time": 150},
-          {"key": "h", "press_time": 220, "release_time": 270}
-        ],
-        "session_start": 0.0,
-        "session_end": 5000.0
-      }
-      // 2-4 more sessions
-    ]
-  }'
-```
+### Verification
 
-### Example: Verify User
+1. Capture a new typing session.
+2. Extract behavioral features.
+3. Compare against the enrolled profile.
+4. Compute confidence using the hybrid model.
+5. Return a Pass, Inconclusive, or Fail decision.
 
-```bash
-curl -X POST http://localhost:8000/verify \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "alice_demo",
-    "session": {
-      "user_id": "alice_demo",
-      "text": "The quick brown fox jumps over the lazy dog",
-      "keystrokes": [...],
-      "session_start": 0.0,
-      "session_end": 5000.0
-    }
-  }'
-```
+---
 
-## How It Works
+## Feature Engineering
 
-### Feature Extraction (13 features)
+The system extracts **24 behavioral features** from each typing session, including:
 
-1. **Dwell Time (5 features)**: Mean, Std, Median, 25th/75th percentile
-2. **Flight Time (3 features)**: Mean, Std, Median
-3. **Digraph Timing (4 features)**: Mean, Std, Max, Min
-4. **Typing Rhythm (1 feature)**: Keys per second
+### Dwell Time Statistics
 
-### Authentication Process
+* Mean
+* Standard deviation
+* Median
+* 25th percentile
+* 75th percentile
+* Maximum
+* Minimum
+* Variance
 
-1. **Enrollment**: Collect 3-5 typing samples
-2. **Profile Creation**: Extract features and calculate statistics
-3. **Authentication**: Compare new sample against profile
-4. **Decision**:
-   - `pass`: confidence >= 0.7
-   - `inconclusive`: 0.6 <= confidence < 0.7
-   - `fail`: confidence < 0.6
+### Flight Time Statistics
+
+* Mean
+* Standard deviation
+* Median
+* Maximum
+* Minimum
+
+### Digraph Timing
+
+* Mean
+* Standard deviation
+* Maximum
+* Minimum
+
+### Typing Behavior
+
+* Typing speed
+* Total session duration
+* Backspace rate
+* Backspace count
+* Pause count
+* Average pause duration
+* Pause ratio
+
+These features collectively describe an individual's typing rhythm and behavioral characteristics.
+
+---
+
+## Machine Learning Pipeline
+
+The authentication engine combines multiple techniques:
+
+* Statistical profile modeling
+* StandardScaler normalization
+* Z-score similarity
+* Nearest sample distance
+* Isolation Forest anomaly detection
+* One-Class SVM classification
+* Weighted ensemble confidence scoring
+
+This hybrid approach improves robustness compared to relying on a single metric.
+
+---
+
+## Authentication Decision
+
+Authentication confidence is mapped to three decision levels:
+
+| Confidence  | Decision     |
+| ----------- | ------------ |
+| ≥ 0.70      | Pass         |
+| 0.60 – 0.69 | Inconclusive |
+| < 0.60      | Fail         |
+
+---
+
+## Local Data Storage
+
+The project uses lightweight local storage for demonstration purposes.
+
+Stored data includes:
+
+* Enrolled user profiles
+* Statistical feature templates
+* Machine learning models
+* Authentication activity logs
+
+No external database is required.
+
+---
 
 ## Testing
 
+Run all tests using:
+
 ```bash
-pytest tests/
+pytest tests/ -v
 ```
 
-## Technical Report
+The project includes tests covering:
 
-See `report.md` for:
-- Detailed methodology
-- Performance characteristics
-- Limitations and constraints
-- Recommended use cases
-- Compliance considerations
+* API endpoints
+* Enrollment workflow
+* Authentication logic
+* Service layer functionality
 
-## Security & Privacy Notes
+---
 
-- **Demo system only** - not for production use
-- Store statistical templates, not raw keystroke logs
-- Feature vectors don't reveal typed content
-- All data files are gitignored
-- Requires user consent in real applications
-- Subject to GDPR/BIPA regulations
+## Security & Privacy
+
+This project is intended for **educational and research purposes**.
+
+Key considerations:
+
+* Local execution only
+* File-based persistence
+* Behavioral templates are stored instead of raw passwords
+* Demonstrates secondary authentication concepts
+* Requires user consent in real-world deployments
+
+---
 
 ## Limitations
 
-- Typing patterns vary with fatigue, stress, device
-- FAR: ~5-10%, FRR: ~10-15%
-- Not suitable as sole authentication method
-- Best used as secondary/continuous authentication
-- Requires 3-5 samples for enrollment
+This implementation is not intended as a production authentication system.
+
+Known limitations include:
+
+* Typing behavior changes due to fatigue, stress, or device differences
+* Small enrollment datasets may affect model performance
+* Local storage instead of enterprise-grade persistence
+* No adaptive profile updates
+* No cloud deployment or distributed architecture
+
+---
+
+## Future Improvements
+
+Potential enhancements include:
+
+* Continuous authentication
+* Adaptive profile updating
+* Device-aware normalization
+* Deep learning sequence models
+* Database-backed storage
+* Docker deployment
+* Cloud-native architecture
+* Real-time monitoring dashboards
+
+---
+
+## Technical Report
+
+A detailed technical report is available in **report.md** and includes:
+
+* System design
+* Feature engineering methodology
+* Machine learning pipeline
+* Experimental observations
+* Testing strategy
+* Limitations
+* Future work
+
+---
+
+## Team
+
+### Contributors
+
+| Member               | Contribution                                                                                               |
+| -------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Lokanshu Tanwar**  | Backend API development, feature extraction, authentication logic, FastAPI endpoints, project architecture |
+| **Mani Yadav Thota** | Machine learning pipeline                                                                                  |
+| **Unnat Vijay**      | Backend development                                                                                        |
+| **Drishti Yadav**    | Streamlit interface                                                                                        |
+| **Utkarsh**          | JavaScript-based keystroke capture                                                                         |
+
+---
 
 ## License
 
-MIT License - Educational Use Only
+This project is released under the **MIT License** and is intended for educational, learning, and research purposes.

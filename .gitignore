@@ -18,3 +18,5 @@ data/*.csv
 *.log
 .DS_Store
 data/.venv/
+# Runtime data
+app/data/
