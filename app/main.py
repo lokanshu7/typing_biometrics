@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.schemas import (
     EnrollRequest,
@@ -153,7 +153,7 @@ async def enroll(request: EnrollRequest):
             confidence=1.0,
             metadata={
                 "samples_collected": result["sample_count"],
-                "enrolled_at": datetime.utcnow().isoformat()
+                "enrolled_at": datetime.now(timezone.utc).isoformat()
             },
             activity_event=ActivityEvent(
                 event_id=event_id,
@@ -161,7 +161,7 @@ async def enroll(request: EnrollRequest):
                 action="enroll",
                 result="pass",
                 score=1.0,
-                timestamp=datetime.utcnow().isoformat() + "Z"
+                timestamp=datetime.now(timezone.utc).isoformat()
             ),
             latency_ms=latency_ms
         )
@@ -185,7 +185,7 @@ async def enroll(request: EnrollRequest):
                 user_id=request.user_id,
                 action="enroll",
                 result="fail",
-                timestamp=datetime.utcnow().isoformat() + "Z"
+                timestamp=datetime.now(timezone.utc).isoformat()
             ),
             latency_ms=latency_ms
         )
@@ -216,7 +216,7 @@ async def verify(request: AuthenticateRequest):
                     user_id=request.user_id,
                     action="verify",
                     result="fail",
-                    timestamp=datetime.utcnow().isoformat() + "Z"
+                    timestamp=datetime.now(timezone.utc).isoformat()
                 ),
                 latency_ms=latency_ms
             )
@@ -238,7 +238,7 @@ async def verify(request: AuthenticateRequest):
             {
                 "authenticated": authenticated,
                 "confidence": confidence,
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat()
             }
         )
 
@@ -269,7 +269,7 @@ async def verify(request: AuthenticateRequest):
                 action="verify",
                 result=decision,
                 score=confidence,
-                timestamp=datetime.utcnow().isoformat() + "Z"
+                timestamp=datetime.now(timezone.utc).isoformat()
             ),
             latency_ms=latency_ms
         )
@@ -291,7 +291,7 @@ async def verify(request: AuthenticateRequest):
                 user_id=request.user_id,
                 action="verify",
                 result="fail",
-                timestamp=datetime.utcnow().isoformat() + "Z"
+                timestamp=datetime.now(timezone.utc).isoformat()
             ),
             latency_ms=latency_ms
         )
