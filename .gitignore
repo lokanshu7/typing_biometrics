@@ -17,4 +17,4 @@ data/*.csv
 .idea/
 *.log
 .DS_Store
-data/
+data/.venv/

@@ -21,9 +21,8 @@ class TypingSession(BaseModel):
     session_end: float
 
 class EnrollRequest(BaseModel):
-    """Request to enroll a new user"""
     user_id: str = Field(..., min_length=3, max_length=50)
-    sessions: List[TypingSession] = Field(..., min_items=3, max_items=10)
+    sessions: List[TypingSession] = Field(..., min_length=3, max_length=10)
 
 class AuthenticateRequest(BaseModel):
     """Request to authenticate a user"""

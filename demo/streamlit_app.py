@@ -1,121 +1,169 @@
 import streamlit as st
 import requests
-import time
+import json
 
+# Backend endpoint location
 API_URL = "http://localhost:8000"
 
 st.set_page_config(page_title="Typing Biometrics Demo", page_icon="🔐", layout="wide")
 st.title("🔐 Typing Pattern Authentication")
-st.markdown("Authenticate users based on their unique typing patterns.")
+st.markdown("Authenticate users securely using unique keystroke dynamic patterns.")
 
+# Dynamic session state synchronization for registered usernames
 if 'enrolled_users' not in st.session_state:
     try:
         response = requests.get(f"{API_URL}/users")
-        st.session_state.enrolled_users = response.json().get("users", []) if response.ok else []
+        if response.ok:
+            st.session_state.enrolled_users = response.json().get("users", [])
+        else:
+            st.session_state.enrolled_users = []
     except:
         st.session_state.enrolled_users = []
 
-mode = st.sidebar.radio("Mode", ["Enroll", "Authenticate", "View Users"])
+mode = st.sidebar.radio("Navigation Menu", ["Enroll New Profile", "Authenticate Profile", "View Registered Users"])
 
-def make_keystrokes(text):
-    """Simulate keystroke timing data"""
+def generate_synthetic_keystrokes(text):
+    """
+    Simulates high-precision floating point timestamps 
+    to fit structural KeystrokeEvent schema requirements
+    """
     keystrokes = []
-    for j, c in enumerate(text):
-        press = 100 * j + (j * 10)
-        release = press + 40 + (j % 3) * 10
-        keystrokes.append({'key': c, 'press_time': float(press), 'release_time': float(release)})
+    for j, char in enumerate(text):
+        press = 100.0 * j + (j * 12.5)
+        # release occurs slightly after press to guarantee positive dwell times
+        release = press + 45.0 + (j % 4) * 8.5
+        keystrokes.append({
+            'key': char, 
+            'press_time': float(press), 
+            'release_time': float(release)
+        })
     return keystrokes
 
-if mode == "Enroll":
-    st.header("👤 Enroll New User")
-    user_id = st.text_input("User ID (e.g. lokanshu)")
+# ==============================================================================
+# ENROLL MODE
+# ==============================================================================
+if mode == "Enroll New Profile":
+    st.header("👤 Profile Registration Portal")
+    user_id = st.text_input("Enter target Username (min 3 characters):").strip()
+    
     phrase = "The quick brown fox jumps over the lazy dog"
-    st.info(f"**Type this phrase exactly in all 3 boxes below:**\n\n`{phrase}`")
+    st.info(f"**Type the verification phrase below exactly (Case-Sensitive):**\n\n`{phrase}`")
 
-    s1 = st.text_input("Sample 1", key="s1")
-    s2 = st.text_input("Sample 2", key="s2")
-    s3 = st.text_input("Sample 3", key="s3")
+    s1 = st.text_input("Sample Recording 1", key="s1")
+    s2 = st.text_input("Sample Recording 2", key="s2")
+    s3 = st.text_input("Sample Recording 3", key="s3")
 
-    if st.button("Enroll"):
-        if not user_id:
-            st.error("Please enter a User ID")
-        elif s1 != phrase or s2 != phrase or s3 != phrase:
-            st.warning(f"⚠️ All 3 samples must exactly match the phrase. Check spelling/spaces.")
+    if st.button("Submit Registration Profile"):
+        if len(user_id) < 3:
+            st.error("❌ Username does not meet requirements. Must be at least 3 characters long.")
+        elif s1.strip() != phrase or s2.strip() != phrase or s3.strip() != phrase: 
+            st.warning("⚠️ Text inputs do not match the required phrase exactly. Verify capitalization or punctuation symbols.")
         else:
-            sessions_data = []
-            for text in [s1, s2, s3]:
-                sessions_data.append({
+            # Constructing list of TypingSession objects containing nested arrays
+            sessions_payload = []
+            for raw_text in [s1, s2, s3]:
+                sessions_payload.append({
                     'user_id': user_id,
-                    'text': text,
-                    'keystrokes': make_keystrokes(text),
+                    'text': raw_text.strip(),
+                    'keystrokes': generate_synthetic_keystrokes(raw_text.strip()),
                     'session_start': 0.0,
-                    'session_end': 5000.0
+                    'session_end': 6000.0
                 })
+            
+            enrollment_request = {
+                'user_id': user_id,
+                'sessions': sessions_payload
+            }
+            
             try:
-                r = requests.post(f"{API_URL}/enroll", json={'user_id': user_id, 'sessions': sessions_data})
-                if r.ok:
+                with st.spinner("Processing biometric characteristics..."):
+                    r = requests.post(f"{API_URL}/enroll_typing", json=enrollment_request)
+                
+                if r.status_code == 200:
                     data = r.json()
                     if data.get('decision') == 'pass':
-                        st.success(f"✅ User '{user_id}' enrolled successfully!")
-                        st.session_state.enrolled_users.append(user_id)
+                        st.success(f"✅ Secure identity profile for user '{user_id}' has been compiled successfully!")
+                        if user_id not in st.session_state.enrolled_users:
+                            st.session_state.enrolled_users.append(user_id)
                     else:
-                        st.error(f"❌ Enrollment failed: {data.get('metadata', {})}")
+                        st.error(f"❌ Rejection handling error: {data.get('metadata', {}).get('reason', 'Unknown parsing error')}")
                 else:
-                    st.error(f"❌ API error {r.status_code}: {r.text}")
-            except Exception as e:
-                st.error(f"❌ Could not connect to API. Is it running? Error: {e}")
+                    st.error(f"❌ Backend returned HTTP {r.status_code}: {r.text}")
+            except Exception as conn_err:
+                st.error(f"❌ Connection dropped or service down. Is your FastAPI engine active? Error: {conn_err}")
 
-elif mode == "Authenticate":
-    st.header("🔓 Authenticate User")
+# ==============================================================================
+# AUTHENTICATE MODE
+# ==============================================================================
+elif mode == "Authenticate Profile":
+    st.header("🔓 Biometric Authentication Entry")
     phrase = "The quick brown fox jumps over the lazy dog"
-    st.info(f"**Type this phrase:**\n\n`{phrase}`")
+    st.info(f"**Verify identity by re-typing this baseline phrase:**\n\n`{phrase}`")
 
     if not st.session_state.enrolled_users:
-        st.warning("No enrolled users yet. Go to Enroll mode first.")
+        st.warning("No registered biometric signatures located locally. Register a user profile via the Enroll tab first.")
     else:
-        user_id = st.selectbox("Select User", st.session_state.enrolled_users)
-        text = st.text_input("Type the phrase here")
+        selected_user = st.selectbox("Identify Username Target", st.session_state.enrolled_users)
+        input_string = st.text_input("Input Verification Sequence", key="auth_input")
 
-        if st.button("Authenticate"):
-            if text != phrase:
-                st.warning("⚠️ Phrase doesn't match exactly.")
+        if st.button("Analyze Signature"):
+            if input_string.strip() != phrase:
+                st.warning("⚠️ Provided baseline string doesn't match target metric structure.")
             else:
-                session = {
-                    'user_id': user_id,
-                    'text': text,
-                    'keystrokes': make_keystrokes(text),
+                authentication_session = {
+                    'user_id': selected_user,
+                    'text': input_string.strip(),
+                    'keystrokes': generate_synthetic_keystrokes(input_string.strip()),
                     'session_start': 0.0,
-                    'session_end': 5000.0
+                    'session_end': 6000.0
                 }
+                
+                auth_request = {
+                    'user_id': selected_user,
+                    'session': authentication_session
+                }
+                
                 try:
-                    r = requests.post(f"{API_URL}/verify", json={'user_id': user_id, 'session': session})
-                    if r.ok:
-                        res = r.json()
-                        confidence = res.get('confidence', 0)
-                        decision = res.get('decision', 'fail')
-                        if decision == 'pass':
-                            st.success(f"✅ AUTHENTICATED! Confidence: {confidence:.1%}")
-                        elif decision == 'inconclusive':
-                            st.warning(f"⚠️ INCONCLUSIVE. Confidence: {confidence:.1%}")
+                    with st.spinner("Calculating similarity metrics..."):
+                        r = requests.post(f"{API_URL}/verify_typing", json=auth_request)
+                    
+                    if r.status_code == 200:
+                        response_json = r.json()
+                        metric_confidence = response_json.get('confidence', 0.0)
+                        final_decision = response_json.get('decision', 'fail')
+                        
+                        if final_decision == 'pass':
+                            st.success(f"✅ Identification Verified! Match confidence index parameters hit {metric_confidence:.1%}")
+                        elif final_decision == 'inconclusive':
+                            st.warning(f"⚠️ Ambiguous Profile Matching. Statistical certainty at {metric_confidence:.1%}")
                         else:
-                            st.error(f"❌ FAILED. Confidence: {confidence:.1%}")
-                        st.json(res)
+                            st.error(f"❌ Access Denied. Pattern fingerprint variance match failed at {metric_confidence:.1%}")
+                        
+                        st.write("#### Raw Structural Engine Response Metrics:")
+                        st.json(response_json)
                     else:
-                        st.error(f"API error: {r.text}")
-                except Exception as e:
-                    st.error(f"❌ Could not connect to API. Is it running? Error: {e}")
+                        st.error(f"❌ Backend Validation Exception: {r.text}")
+                except Exception as conn_err:
+                    st.error(f"❌ Connection failure to core platform engine: {conn_err}")
 
+# ==============================================================================
+# VIEW REGISTERED USERS
+# ==============================================================================
 else:
-    st.header("📄 Enrolled Users")
+    st.header("📄 Active Biometric Databases")
     try:
         r = requests.get(f"{API_URL}/users")
-        if r.ok:
-            data = r.json()
-            users = data.get("users", [])
-            st.success(f"Total enrolled: {len(users)}")
-            for u in users:
-                st.write(f"• {u}")
+        if r.status_code == 200:
+            user_data = r.json()
+            active_list = user_data.get("users", [])
+            st.success(f"Successfully connected to directory infrastructure. Total users registered: {len(active_list)}")
+            
+            if active_list:
+                for entry in active_list:
+                    st.write(f"🔒 **Enrolled Identity Reference:** `{entry}`")
+            else:
+                st.info("No signatures stored in active directory path.")
         else:
-            st.error("Could not fetch users")
-    except:
-        st.error("❌ API not running. Start it with: python3 main.py")
+            st.error(f"Failed to cleanly communicate with identity endpoints. HTTP: {r.status_code}")
+    except Exception as service_err:
+        st.error(f"❌ Directory reading module isolated. Ensure local server execution via terminal: `python3 -m app.main` or `uvicorn app.main:app` out of root directory space. Log context: {service_err}")
